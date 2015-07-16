@@ -22,8 +22,12 @@ A wordpress cluster plus one load balancer. Floating ip is associated with load 
 2.3) Validation - http://floating_ip_addr, a wordpress installation page shows up. It's roundrobin balancer, so refresh the ip multiple times to check all wordpress instances work fine. 
 
 2.4) Samples :
+
 - create one mysql, 3 wordpress VMs and one load balancer with two 2GB volumes attached each:
+
 heat stack-create wordpress_ha -f heat_wp_ha.yaml -P "public_network_id=***;key=;wordpress_cluster_size=3;volume_count=2;volume_size=2"
+
 - scale-out wordpress cluster:
+
 heat stack-update wordpress_ha -f heat_wp_ha.yaml -P "public_network_id=***;key=;wordpress_cluster_size=5;volume_count=2;volume_size=2"
 
