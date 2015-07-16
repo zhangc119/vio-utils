@@ -1,4 +1,4 @@
-Heat templates to install wordpress application throught Vmware Integrated Openstack (inspired by https://github.com/miguelgrinberg/heat-tutorial)
+Heat templates to install wordpress application through Vmware Integrated Openstack (inspired by https://github.com/miguelgrinberg/heat-tutorial)
 
 1) heat_wp.yaml
 ------------------------------------------------------
