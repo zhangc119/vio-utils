@@ -37,12 +37,12 @@ parameters:
  
 resources:
   network:
-    type: wordpress_networks.yaml
+    type: lib/wordpress_networks.yaml
     properties:
       public_network: { get_param: public_network_id }
 
   mysql:
-    type: mysql.yaml
+    type: lib/mysql.yaml
     properties:
       volume_count: { get_param: volume_count }
       volume_size: { get_param: volume_size }
@@ -54,7 +54,7 @@ resources:
       database_user: wordpress_user
  
   wordpress:
-    type: wordpress.yaml
+    type: lib/wordpress.yaml
     properties:
       volume_count: { get_param: volume_count }
       volume_size: { get_param: volume_size }
@@ -68,7 +68,7 @@ resources:
       database_password: { get_attr: [mysql, database_password] }
 
   floating_ip:
-    type: floating_ip.yaml
+    type: lib/floating_ip.yaml
     depends_on: wordpress
     properties:
       port_id: { get_attr: [wordpress, port] }
