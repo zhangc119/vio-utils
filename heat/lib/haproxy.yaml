@@ -27,6 +27,7 @@ parameters:
     type: comma_delimited_list
     label: Servers
     description: Comma separated list of servers in the cluster.
+    default: []
   volume_count:
     type: number
     label: Number of volumes
