@@ -1,6 +1,9 @@
 heat_template_version: 2013-05-23
  
-description: Template that installs a wordpress server and supporting MySQL database running on separate servers
+description: Template that installs wordpress cluster with load balancer and supporting MySQL database running on separate server
+
+# Required sub templates : lib/wordpress_networks.yaml, lib/mysql.yaml, lib/wordpress.yaml, lib/floating_ip.yaml, lib/haproxy.yaml
+# Note : Due to metadata key/value length limitation (255 characters), please comment line "servers: { get_attr: [wordpress_cluster, ip] }" if wordpress_cluster_size > 15 
  
 parameters:
   wordpress_cluster_size:
