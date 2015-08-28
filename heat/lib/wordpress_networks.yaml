@@ -18,6 +18,10 @@ parameters:
     label: CIDR
     description: The CIDR of the private network for wordpress instance.
     default: '10.1.2.0/24'
+  router_type:
+    type: string
+    description: Router type, like shared, exclusive.
+    default: shared
   dns:
     type: comma_delimited_list
     label: DNS nameservers
@@ -57,6 +61,8 @@ resources:
       name: wordpress_router
       external_gateway_info:
         network: { get_param: public_network }
+      value_specs:
+        router_type: { get_param: router_type }
 
   router-interface_db:
     type: OS::Neutron::RouterInterface
@@ -77,3 +83,6 @@ outputs:
   wordpress_net_id:
     description: The wordpress network id.
     value: { get_resource: wordpress_network }
+  wordpress_subnet_id:
+    description: The wordpress subnet id.
+    value: { get_resource: wordpress_subnet }

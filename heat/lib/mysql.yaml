@@ -88,10 +88,10 @@ resources:
       user_data:
         str_replace:
           params:
-            __mysql_root_password__: password
+            __mysql_root_password__: { get_attr: [mysql_root_password, value] }
             __database_name__: { get_param: database_name }
             __database_user__: { get_param: database_user }
-            __database_password__: password
+            __database_password__: { get_attr: [database_password, value] }
           template: |
             #!/bin/bash
 

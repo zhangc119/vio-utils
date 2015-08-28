@@ -18,6 +18,10 @@ parameters:
     label: Key name
     description: Name of key-pair to be used for compute instance
     default: vioKey
+  metadata:
+    type: json
+    label: Meta data
+    default: {}
   wordpress_network_id:
     type: string
     label: Private wordpress network ID
@@ -79,6 +83,7 @@ resources:
       image: { get_param: image }
       flavor: { get_param: flavor }
       key_name: { get_param: key }
+      metadata: {get_param: metadata}
       networks:
         - port: { get_resource: port }
       user_data_format: RAW
@@ -88,7 +93,7 @@ resources:
             __mysql_ip__: { get_param: mysql_server }
             __database_name__: { get_param: database_name }
             __database_user__: { get_param: database_user }
-            __database_password__: password
+            __database_password__: { get_param: database_password }
           template: |
             #!/bin/bash -ex
             

@@ -1,0 +1,80 @@
+heat_template_version: 2013-05-23
+
+description: Wordpress as a pool member
+
+parameters:
+  image:
+    type: string
+    label: Image name or ID
+    description: Image to be used for server. Please use an Ubuntu based image.
+    default: ubuntu-14.04-server-amd64
+  flavor:
+    type: string
+    label: Flavor
+    description: Type of instance (flavor) to be used on the compute instance.
+    default: m1.small
+  key:
+    type: string
+    label: Key name
+    description: Name of key-pair to be used for compute instance
+    default: vioKey
+  metadata:
+    type: json
+    label: Meta data
+  wordpress_network_id:
+    type: string
+    label: Private wordpress network ID
+    description: Network to attach server to.
+    default: private
+  mysql_server:
+    type: string
+    label: MySQL database server IP address
+    description: IP address of the MySQL database server.
+  database_name:
+    type: string
+    label: Database name
+    description: Name of the application database.
+  database_user:
+    type: string
+    label: Database user
+    description: Name of the database user.
+  database_password:
+    type: string
+    label: Database password
+    hidden: true
+    description: Password to access the database.
+  volume_count:
+    type: number
+    description: Number of volumes to attach to server
+    default: 0
+    constraints:
+      - range: {min: 0, max: 10}
+  volume_size:
+    type: number
+    description: Size of volume to attach to server
+    default: 1
+  pool_id:
+    type: string
+    description: Pool to contact
+
+resources:
+  wordpress:
+    type: wordpress.yaml
+    properties:
+      volume_count: { get_param: volume_count }
+      volume_size: { get_param: volume_size }
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      key: { get_param: key }
+      metadata: {get_param: metadata}
+      wordpress_network_id: { get_param: wordpress_network_id }
+      mysql_server: { get_param: mysql_server }
+      database_name: { get_param: database_name }
+      database_user: { get_param: database_user }
+      database_password: { get_param: database_password }
+  member:
+    type: OS::Neutron::PoolMember
+    properties:
+      pool_id: {get_param: pool_id}
+      address: {get_attr: [wordpress, ip]}
+      protocol_port: 80

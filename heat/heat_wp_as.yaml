@@ -1,0 +1,170 @@
+heat_template_version: 2013-05-23
+ 
+description: Template that installs wordpress cluster on LBaaS and supporting MySQL database running on separate server. The cluster supports auto scaling out/in via ceilometer cpu_util alarm.`
+
+# Required sub templates : lib/wordpress_networks.yaml, lib/mysql.yaml, lib/wordpress.yaml, lib/wordpress_pm.yaml, lib/floating_ip.yaml, lib/volume_with_attachment.yaml
+ 
+parameters:
+  wordpress_cluster_size_min:
+    type: number
+    description: Wordpress instance number 
+    default: 1
+  wordpress_cluster_size_max:
+    type: number
+    description: Wordpress instance number
+    default: 3
+  image:
+    type: string
+    label: Image name or ID
+    description: Image to be used for server. Please use an Ubuntu based image.
+    default: ubuntu-14.04-server-amd64
+  flavor:
+    type: string
+    label: Flavor
+    description: Type of instance (flavor) to be used on the compute instance.
+    default: m1.small
+  key:
+    type: string
+    label: Key name
+    description: Name of key-pair to be installed on the compute instance.
+    default: vioKey
+  public_network_id:
+    type: string
+    label: Public network ID
+    description: Public network to attach server to.
+    default: public
+  volume_count:
+    type: number
+    label: Number of volumes
+    description: Number of volumes to attach to server
+    default: 0
+    constraints:
+      - range: {min: 0, max: 10}
+  volume_size:
+    type: number
+    description: Size of volume to attach to server
+    default: 1
+ 
+resources:
+  network:
+    type: wordpress_networks.yaml
+    properties:
+      public_network: { get_param: public_network_id }
+      router_type: exclusive
+
+  mysql:
+    type: mysql.yaml
+    properties:
+      volume_count: { get_param: volume_count }
+      volume_size: { get_param: volume_size }
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      key: { get_param: key }
+      db_network_id: { get_attr: [network, db_net_id] }
+      database_name: wordpress
+      database_user: wordpress_user
+ 
+  wordpress_cluster:
+    type: OS::Heat::AutoScalingGroup
+    properties:
+      min_size: { get_param: wordpress_cluster_size_min }
+      max_size: { get_param: wordpress_cluster_size_max }
+      resource:
+        type: wordpress_pm.yaml
+        properties:
+          volume_count: { get_param: volume_count }
+          volume_size: { get_param: volume_size }
+          image: { get_param: image }
+          flavor: { get_param: flavor }
+          key: { get_param: key }
+          pool_id: {get_resource: pool}
+          metadata: {"metering.stack": {get_param: "OS::stack_id"}}
+          wordpress_network_id: { get_attr: [network, wordpress_net_id] }
+          mysql_server: { get_attr: [mysql, ip] }
+          database_name: wordpress
+          database_user: wordpress_user
+          database_password: { get_attr: [mysql, database_password] }
+
+  monitor:
+    type: OS::Neutron::HealthMonitor
+    properties:
+      type: TCP
+      delay: 5
+      max_retries: 5
+      timeout: 5
+
+  pool:
+    type: OS::Neutron::Pool
+    properties:
+      protocol: HTTP
+      monitors: [{get_resource: monitor}]
+      subnet_id: { get_attr: [network, wordpress_subnet_id] }
+      lb_method: ROUND_ROBIN
+      vip:
+        protocol_port: 80
+  lb:
+    type: OS::Neutron::LoadBalancer
+    properties:
+      protocol_port: 80
+      pool_id: {get_resource: pool}
+
+#  auto_scaling:
+#    type: autoscaling.yaml
+#    properties:
+#      scaling_group_id: { get_resource: wordpress_cluster }
+#      stack_id: { get_param: "OS::stack_id" }
+
+  server_scaleout_policy:
+    type: OS::Heat::ScalingPolicy
+    properties:
+      adjustment_type: change_in_capacity
+      auto_scaling_group_id: { get_resource: wordpress_cluster }
+      cooldown: 60
+      scaling_adjustment: 1
+
+  server_scalein_policy:
+    type: OS::Heat::ScalingPolicy
+    properties:
+      adjustment_type: change_in_capacity
+      auto_scaling_group_id: { get_resource: wordpress_cluster }
+      cooldown: 60
+      scaling_adjustment: -1
+
+  cpu_alarm_high:
+    type: OS::Ceilometer::Alarm
+    properties:
+      description: Scale-out if the average CPU > 30% for 1 minute
+      meter_name: cpu_util
+      statistic: avg
+      period: 60
+      evaluation_periods: 1
+      threshold: 30
+      alarm_actions:
+        - {get_attr: [server_scaleout_policy, alarm_url]}
+      matching_metadata: {'metadata.user_metadata.stack': { get_param: "OS::stack_id" }}
+      comparison_operator: gt
+
+  cpu_alarm_low:
+    type: OS::Ceilometer::Alarm
+    properties:
+      description: Scale-in if the average CPU < 5% for 10 minutes
+      meter_name: cpu_util
+      statistic: avg
+      period: 600
+      evaluation_periods: 1
+      threshold: 5
+      alarm_actions:
+        - {get_attr: [server_scalein_policy, alarm_url]}
+      matching_metadata: {'metadata.user_metadata.stack': { get_param: "OS::stack_id" }}
+      comparison_operator: lt
+
+  floating_ip:
+    type: floating_ip.yaml 
+    properties:
+      port_id: {get_attr: [pool, vip, port_id]}
+      public_network_id: { get_param: public_network_id }
+
+outputs:
+  ip:
+    description: The public IP address to access the server.
+    value: { get_attr: [floating_ip, ip] }
