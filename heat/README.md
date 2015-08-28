@@ -33,3 +33,6 @@ heat stack-create wordpress_ha -f heat_wp_ha.yaml -P "public_network_id=***;key=
 
 heat stack-update wordpress_ha -f heat_wp_ha.yaml -P "public_network_id=***;key=;wordpress_cluster_size=5;volume_count=2;volume_size=2"
 
+3) heat_wp_as.yaml
+------------------------------------------------------
+Template that installs wordpress cluster on LBaaS and supporting MySQL database running on separate server. The cluster supports auto scaling out/in via ceilometer cpu_util alarm
