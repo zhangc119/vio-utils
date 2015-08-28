@@ -1,6 +1,6 @@
 heat_template_version: 2013-05-23
  
-description: Template that installs wordpress cluster on LBaaS and supporting MySQL database running on separate server. The cluster supports auto scaling out/in via ceilometer cpu_util alarm.`
+description: Template that installs wordpress cluster on LBaaS and supporting MySQL database running on separate server. The cluster supports auto scaling out/in via ceilometer cpu_util alarm.
 
 # Required sub templates : lib/wordpress_networks.yaml, lib/mysql.yaml, lib/wordpress.yaml, lib/wordpress_pm.yaml, lib/floating_ip.yaml, lib/volume_with_attachment.yaml
  
