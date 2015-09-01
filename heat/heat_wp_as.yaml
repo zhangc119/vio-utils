@@ -47,13 +47,13 @@ parameters:
  
 resources:
   network:
-    type: wordpress_networks.yaml
+    type: lib/wordpress_networks.yaml
     properties:
       public_network: { get_param: public_network_id }
       router_type: exclusive
 
   mysql:
-    type: mysql.yaml
+    type: lib/mysql.yaml
     properties:
       volume_count: { get_param: volume_count }
       volume_size: { get_param: volume_size }
@@ -70,7 +70,7 @@ resources:
       min_size: { get_param: wordpress_cluster_size_min }
       max_size: { get_param: wordpress_cluster_size_max }
       resource:
-        type: wordpress_pm.yaml
+        type: lib/wordpress_pm.yaml
         properties:
           volume_count: { get_param: volume_count }
           volume_size: { get_param: volume_size }
@@ -107,12 +107,6 @@ resources:
     properties:
       protocol_port: 80
       pool_id: {get_resource: pool}
-
-#  auto_scaling:
-#    type: autoscaling.yaml
-#    properties:
-#      scaling_group_id: { get_resource: wordpress_cluster }
-#      stack_id: { get_param: "OS::stack_id" }
 
   server_scaleout_policy:
     type: OS::Heat::ScalingPolicy
@@ -159,7 +153,7 @@ resources:
       comparison_operator: lt
 
   floating_ip:
-    type: floating_ip.yaml 
+    type: lib/floating_ip.yaml 
     properties:
       port_id: {get_attr: [pool, vip, port_id]}
       public_network_id: { get_param: public_network_id }
