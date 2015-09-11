@@ -10,6 +10,7 @@ alias nova="nova --insecure"
 alias neutron="neutron --insecure"
 alias heat="heat --insecure"
 alias glance="glance --insecure"
+alias cinder="cinder --insecure"
 alias ceilometer="ceilometer --os-insecure true"
 
 # Rally configurations
@@ -19,7 +20,7 @@ RALLY_LOG_DIR=$RALLY_FILE_REPO/logs
 RALLY_CONF_FILE=$RALLY_FILE_REPO/rally.conf
 RALLY_TASK_DIR=$RALLY_FILE_REPO/tasks
 RALLY_HOT_DIR=$RALLY_FILE_REPO/hots
-RALLY_PLUGIN_DIR=$RALLY_FILE_REPO/plugins/
+RALLY_PLUGIN_DIR=$RALLY_FILE_REPO/plugins
 
 cyan='\E[36;40m'
 green='\E[32;40m'
@@ -300,8 +301,8 @@ rally_increase_quota() {
   nova quota-class-update --ram 5120000 default
   cecho "new nova default quota" $cyan
   nova quota-defaults
-  cecho "remember to execute 'cinder quota-class-update --volumes 1100 --snapshots 1100 --gigabytes 11000 default' on openstack node' to increase cinder quota." $yellow
-  #cinder quota-class-update --volumes 1100 --snapshots 1100 --gigabytes 11000 default`
+  cecho "updating cinder default quota" $cyan
+  cinder quota-class-update --volumes 1100 --snapshots 1100 --gigabytes 11000 default
   for tid in `keystone tenant-list | grep $TENANT_PREFIX | awk 'BEGIN {FS="|";} {print $2}'`
 do
   cecho "updating neutron quota for tenant $tid" $cyan
@@ -359,6 +360,7 @@ check_wordpress_fips() {
   cecho "$description -- starting" $cyan
   for fip in `neutron floatingip-list | grep -v "floating_ip_address" | awk 'BEGIN {FS="|";} {if($4) print $4}'`
   do
+    wget http://$fip/wp-admin/install.php -o /tmp/wordpress
     validation=`grep "English (United States)" /tmp/wordpress | wc -l`
     if [ $validation -eq 1 ]
     then
@@ -434,11 +436,11 @@ rally_hot_plugins() {
   fi
   cecho "$description -- starting" $cyan
   mkdir -p $RALLY_PLUGIN_DIR/scenario
-  echo "generating $RALLY_PLUGIN_DIR/scenario/stack_seeding.py with scenario StackSeeding.populate_stacks which doesn't clean up created stacks in the end"
+  cecho "generating $RALLY_PLUGIN_DIR/scenario/stack_seeding.py with scenario StackSeeding.populate_stacks which doesn't clean up created stacks in the end" $cyan
   cat >$RALLY_PLUGIN_DIR/scenario/stack_seeding.py <<EOF
-from rally.benchmark.scenarios import base
-from rally.benchmark import types
-from rally.benchmark import validation
+from rally.task.scenarios import base
+from rally.task import types
+from rally.task import validation
 from rally import consts
 from rally.plugins.openstack.scenarios.heat import stacks
 
