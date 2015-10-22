@@ -360,7 +360,7 @@ check_wordpress_fips() {
   cecho "$description -- starting" $cyan
   for fip in `neutron floatingip-list | grep -v "floating_ip_address" | awk 'BEGIN {FS="|";} {if($4) print $4}'`
   do
-    wget http://$fip/wp-admin/install.php -o /tmp/wordpress
+    wget http://$fip/wp-admin/install.php -O /tmp/wordpress
     validation=`grep "English (United States)" /tmp/wordpress | wc -l`
     if [ $validation -eq 1 ]
     then
@@ -408,8 +408,7 @@ rally_hot_weave() {
     fi
     exit 0
   fi
-  description="copy $(dirname "${BASH_SOURCE[0]}")/../heat to $RALLY_HOT_DI
-R and weave templates using local apt repository '${1}'"
+  description="copy $(dirname "${BASH_SOURCE[0]}")/../heat to $RALLY_HOT_DIR and weave templates using local apt repository '${1}'"
   cecho "$description -- starting" $cyan
   mkdir -p $RALLY_HOT_DIR
   local local_repo=$1
