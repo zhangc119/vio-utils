@@ -360,7 +360,7 @@ check_wordpress_fips() {
   cecho "$description -- starting" $cyan
   for fip in `neutron floatingip-list | grep -v "floating_ip_address" | awk 'BEGIN {FS="|";} {if($4) print $4}'`
   do
-    wget http://$fip/wp-admin/install.php -O /tmp/wordpress
+    wget http://$fip/wp-admin/install.php -O /tmp/wordpress -o /tmp/wget
     validation=`grep "English (United States)" /tmp/wordpress | wc -l`
     if [ $validation -eq 1 ]
     then
@@ -373,10 +373,15 @@ check_wordpress_fips() {
 }
 
 rally_conf_file() {
-  local description="generate $RALLY_CONF_FILE where customised rally settings exist"
+  local description="generate $RALLY_CONF_FILE where customised rally settings are configured"
   if [ "-h" == $1 ]
   then
-    cecho "$description" $cyan
+    cecho "$description, add option '-o' if you want to overwrite existing file" $cyan
+    exit 0
+  fi
+  if [[ "-o" != $1 ]] && [[ -f $RALLY_CONF_FILE ]]
+  then
+    cecho "$description -- skipped as $RALLY_CONF_FILE already exists" $yellow
     exit 0
   fi
   cecho "$description -- starting" $cyan
@@ -430,14 +435,19 @@ rally_hot_plugins() {
   local description="generate rally plugins into $RALLY_PLUGIN_DIR"
   if [ "-h" == $1 ]
   then
-    cecho "$description" $cyan
+    cecho "$description, add option '-o' if you want to overwrite existing files" $cyan
+    exit 0
+  fi
+  if [[ "-o" != $1 ]] && [[ -f $RALLY_PLUGIN_DIR/scenario/stack_seeding.py ]]
+  then
+    cecho "$description -- skipped as plugins already exist" $yellow
     exit 0
   fi
   cecho "$description -- starting" $cyan
   mkdir -p $RALLY_PLUGIN_DIR/scenario
   cecho "generating $RALLY_PLUGIN_DIR/scenario/stack_seeding.py with scenario StackSeeding.populate_stacks which doesn't clean up created stacks in the end" $cyan
   cat >$RALLY_PLUGIN_DIR/scenario/stack_seeding.py <<EOF
-from rally.task.scenarios import base
+from rally.plugins.openstack import scenario
 from rally.task import types
 from rally.task import validation
 from rally import consts
@@ -447,7 +457,7 @@ class StackSeeding(stacks.HeatStacks):
 
     @types.set(template_path=types.FileType, files=types.FileTypeDict)
     @validation.required_services(consts.Service.HEAT)
-    @base.scenario()
+    @scenario.configure(context={})
     def populate_stacks(self, template_path, parameters=None,
                               files=None, environment=None):
         self._create_stack(template_path, parameters, files, environment)
