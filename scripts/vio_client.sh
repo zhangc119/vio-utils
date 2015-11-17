@@ -182,12 +182,13 @@ rally_init() {
     cecho "$description" $cyan
     exit 0
   fi
-  cecho "executing :: rally-manage db recreate" $cyan
-  rally-manage db recreate 
+  rally_conf_file
+  cecho "executing :: rally-manage --config-file $RALLY_CONF_FILE db recreate" $cyan
+  rally-manage --config-file $RALLY_CONF_FILE db recreate 
   rally_generate_deployment
-  cecho "executing :: rally deployment create --name $RALLY_DEPLOY_NAME --filename $RALLY_DEPLOY_FILE" $cyan
+  cecho "executing :: rally --config-file $RALLY_CONF_FILE deployment create --name $RALLY_DEPLOY_NAME --filename $RALLY_DEPLOY_FILE" $cyan
   rm $RALLY_FILE_REPO/openrc
-  rally deployment create --name $RALLY_DEPLOY_NAME --filename $RALLY_DEPLOY_FILE
+  rally --config-file $RALLY_CONF_FILE deployment create --name $RALLY_DEPLOY_NAME --filename $RALLY_DEPLOY_FILE
 }
 
 create_external_network() {
@@ -398,6 +399,9 @@ rally_debug=true
 heat_stack_create_timeout=14400.0
 heat_stack_create_prepoll_delay=300.0
 heat_stack_create_poll_interval=10.0
+
+[database]
+connection = `echo "sqlite:///$RALLY_FILE_REPO/.rally.sqlite"`
 EOF
   cecho "$description -- done" $cyan
 }
@@ -525,6 +529,7 @@ rally_hot_task_file() {
   if [ -z $external_net ]
   then
     cecho "an external network is required for function rally_heat_task_file" $red
+    exit 1
   fi
   external_net=`echo $external_net`
   local description="generate rally task file '$task_file' with scenario=$scenario, template=$template, runs=$runs, concurrency=$concurrency and public_network_id=$external_net"
@@ -612,7 +617,64 @@ rally_start_task() {
   description="kick off rally task '$task_file'"
   cecho "$description -- starting" $cyan
   cd $RALLY_HOT_DIR # to be deleted if the bug is resolved
-  rally --config-file $RALLY_CONF_FILE task start $task_file
+  rally --norally-debug --nodebug --config-file $RALLY_CONF_FILE task start $task_file
+  cecho "$description -- done" $cyan
+}
+
+rally_task_report() {
+  local description="generate report of certain rally task"
+  local task=""
+  local format="html"
+  local output="report.html"
+  while [[ $# > 0 ]]
+  do
+    key="$1"
+    case $key in
+      -h|--help)
+      cecho "$description" $cyan
+      if [[ "-usage_hidden" != $2 ]]
+      then
+        cecho "usage: $0 ${FUNCNAME} [-t task(default latest)][-f format('junit','json' or 'html', default $format)][-o output(default $output)]" $yellow
+      fi
+      exit 0
+      ;;
+      -t|--task)
+      task="$2"
+      shift
+      ;;
+      -f|--format)
+      format="$2"
+      shift
+      ;;
+      -o|--output)
+      output="$2"
+      shift
+      ;;
+      *)
+    esac
+    shift
+  done
+  if [ "$task" == "" ]
+  then
+    task=`rally --norally-debug --nodebug task list | grep $RALLY_DEPLOY_NAME | awk 'BEGIN {FS="|";} END {print $2}'`
+  else
+    task=`rally --norally-debug --nodebug task list | grep $RALLY_DEPLOY_NAME | grep $task | awk 'BEGIN {FS="|";} {print $2}'`
+  fi
+  if [ -z $task ]
+  then
+    cecho "requested task doesn't exist for function rally_task_report" $red
+    exit 1
+  fi
+  cecho "$description with task=$task, format=$format, output=$output -- starting" $cyan
+  if [ "junit" == $format ]
+  then
+    rally --nodebug --norally-debug task report $task --junit --out $output 
+  elif [ "json" == $format ]
+  then
+    rally --nodebug --norally-debug task results $task > $output
+  else
+    rally --nodebug --norally-debug task report $task --out $output
+  fi
   cecho "$description -- done" $cyan
 }
 
