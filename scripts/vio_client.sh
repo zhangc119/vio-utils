@@ -596,7 +596,7 @@ rally_start_task() {
     cecho "$description" $cyan
     if [[ "-usage_hidden" != $2 ]]
     then
-      cecho "usage: $0 ${FUNCNAME} task_file" $yellow
+      cecho "usage: $0 ${FUNCNAME} task_file [--hide-rally-stderr]" $yellow
     fi
     exit 0
   fi
@@ -617,7 +617,12 @@ rally_start_task() {
   description="kick off rally task '$task_file'"
   cecho "$description -- starting" $cyan
   cd $RALLY_HOT_DIR # to be deleted if the bug is resolved
-  rally --norally-debug --nodebug --config-file $RALLY_CONF_FILE task start $task_file
+  if [[ "--hide-rally-stderr" != $2 ]]
+  then
+    rally --config-file $RALLY_CONF_FILE task start $task_file
+  else
+    rally --config-file $RALLY_CONF_FILE task start $task_file 2>/dev/null
+  fi
   cecho "$description -- done" $cyan
 }
 
@@ -664,6 +669,21 @@ rally_task_report() {
   then
     cecho "requested task doesn't exist for function rally_task_report" $red
     exit 1
+  fi
+  local finished=`rally --norally-debug --nodebug task status $task | grep finished`
+  if [ -z "$finished" ]
+  then
+    cecho "$(rally --norally-debug --nodebug task status $task)" $red
+    exit 1
+  fi
+  local fail=`rally --norally-debug --nodebug task sla_check $task | grep FAIL` 
+  if [ ! -z "$fail" ]
+  then
+    cecho "sla_check task $task - $fail" $red
+    if [[ "$fail" =~ "something_went_wrong" ]]
+    then
+      exit 1
+    fi
   fi
   cecho "$description with task=$task, format=$format, output=$output -- starting" $cyan
   if [ "junit" == $format ]
@@ -713,7 +733,7 @@ else
     else 
       $@ 2> >(
         while IFS='' read -r line || [ -n "$line" ]; do
-          if [[ ! $line =~ InsecurePlatformWarning|DeprecationWarning|InsecureRequestWarning ]]
+          if [[ ! $line =~ InsecurePlatformWarning|DeprecationWarning|InsecureRequestWarning|\*\*kwargs ]]
           then
             cecho "${line}" $red
           fi
