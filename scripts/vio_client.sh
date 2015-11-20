@@ -184,11 +184,14 @@ rally_init() {
   fi
   rally_conf_file
   cecho "executing :: rally-manage --config-file $RALLY_CONF_FILE db recreate" $cyan
-  rally-manage --config-file $RALLY_CONF_FILE db recreate 
+  rally-manage --nodebug --norally-debug --config-file $RALLY_CONF_FILE db recreate 
   rally_generate_deployment
   cecho "executing :: rally --config-file $RALLY_CONF_FILE deployment create --name $RALLY_DEPLOY_NAME --filename $RALLY_DEPLOY_FILE" $cyan
-  rm $RALLY_FILE_REPO/openrc
-  rally --config-file $RALLY_CONF_FILE deployment create --name $RALLY_DEPLOY_NAME --filename $RALLY_DEPLOY_FILE
+  if [ -f $RALLY_FILE_REPO/openrc ]
+  then
+    rm -f $RALLY_FILE_REPO/openrc
+  fi
+  rally --config-file $RALLY_CONF_FILE deployment create --name $RALLY_DEPLOY_NAME --filename $RALLY_DEPLOY_FILE 2>/dev/null
 }
 
 create_external_network() {
