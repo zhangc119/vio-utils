@@ -108,7 +108,7 @@ KEYPAIR=vioKey
 #red='\033[31m'
 #yellow='\033[33m'
 EOF
-  cecho "It might be the first time to execute the script in the environment. Configuration file $env is generated and please enter approperiate values inside it before next run." $yellow
+  cecho "It might be the first time to execute the script in the environment. Configuration file $env is generated and please enter approperiate values inside it before next run." $cyan
   exit 0
   else
     source $env 
@@ -370,7 +370,7 @@ check_wordpress_fips() {
     then
       cecho "Wordpress validation on floating ip $fip -- succeeded" $green
     else
-      cecho "Wordpress validation on floating ip $fip -- failed" $red
+      cecho "Wordpress validation on floating ip $fip -- failed" $yellow
     fi
   done
   cecho "$description -- done" $cyan
