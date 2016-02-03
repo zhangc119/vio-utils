@@ -274,6 +274,57 @@ defcore_remove_seeding() {
   remove_tenants_users tempest
 }
 
+switch_to_user() {
+  local description="Generate a plain file of environment parameters for certain user to use openstack CLI"
+  local tenant=$OS_TENANT_NAME
+  local username=$OS_USERNAME
+  local password=$OS_PASSWORD
+  while [[ $# > 0 ]]
+  do
+    key="$1"
+    case $key in
+      -h|--help)
+      cecho "$description" $cyan
+      if [[ "-usage_hidden" != $2 ]]
+      then
+        cecho "usage: $0 ${FUNCNAME} [-t tenant(default $tenant)][-u username(default $username)][-p password(default $password)]" $yellow
+      fi
+      exit 0
+      ;;
+      -t|--tenant)
+      tenant="$2"
+      shift
+      ;;
+      -u|--username)
+      username="$2"
+      shift
+      ;;
+      -p|--password)
+      password="$2"
+      shift
+      ;;
+      *)
+    esac
+    shift
+  done
+  cecho "$description -- starting" $cyan
+  cat > $RALLY_FILE_REPO/openrc_tenant <<EOF
+export OS_AUTH_URL=$OS_AUTH_URL
+export OS_USERNAME=$username
+export OS_PASSWORD=$password
+export OS_TENANT_NAME=$tenant
+export OS_REGION_NAME=$OS_REGION_NAME
+alias nova="nova --insecure"
+alias neutron="neutron --insecure"
+alias heat="heat --insecure"
+alias glance="glance --insecure"
+alias cinder="cinder --insecure"
+alias ceilometer="ceilometer --os-insecure true"
+EOF
+  cecho "$description -- done" $cyan
+  cecho "Please run 'source $RALLY_FILE_REPO/openrc_tenant' to declare the environment variables in your current process" $cyan
+}
+
 rally_add_keypairs() {
   local description="create keypair '$KEYPAIR' for all created users $TENANT_PREFIX(1-$TENANT_COUNT)_user(1-$USERS_PER_TENANT)"
   if [ "-h" == $1 ]
