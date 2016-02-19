@@ -21,6 +21,8 @@ RALLY_CONF_FILE=$RALLY_FILE_REPO/rally.conf
 RALLY_TASK_DIR=$RALLY_FILE_REPO/tasks
 RALLY_HOT_DIR=$RALLY_FILE_REPO/hots
 RALLY_PLUGIN_DIR=$RALLY_FILE_REPO/plugins
+RALLY_USER_FILE=$RALLY_FILE_REPO/users.txt
+RALLY_DEPLOY_NAME=vio
 
 cyan='\E[36;40m'
 green='\E[32;40m'
@@ -80,26 +82,31 @@ env_file() {
   mkdir -p $RALLY_FILE_REPO
   if [ ! -f $env ]
   then
-    cat >~/.vio_client.conf <<EOF
+    local auth="http://<internal_vip>:5000/v2.0/"
+    if [ ! -z $OS_AUTH_URL ]
+    then
+      auth=$OS_AUTH_URL
+    fi
+    local user="admin"
+    if [ ! -z $OS_USERNAME ]
+    then
+      user=$OS_USERNAME
+    fi
+    local password=""
+    if [ ! -z $OS_PASSWORD ]
+    then
+      password=$OS_PASSWORD
+    fi
+    cat >$env <<EOF
 # Openstack client environment parameters
-export OS_AUTH_URL=http://<internal_vip>:5000/v2.0/
-export OS_USERNAME=admin
-export OS_PASSWORD=
+export OS_AUTH_URL=$auth
+export OS_USERNAME=$user
+export OS_PASSWORD=$password
 export OS_TENANT_NAME=admin
 export OS_REGION_NAME=nova
 
 # Openstack data population configurations
-TENANT_COUNT=2
-USERS_PER_TENANT=2
-TENANT_PREFIX=vio_tenant
-USER_PASSWORD=vmware
-RALLY_DEPLOY_NAME=vio
 EXTERNAL_NETWORK=flat
-EXTERNAL_NET_DVPORTGROUP=dvportgroup-<num>
-EXTERNAL_NET_GATEWAY=
-EXTERNAL_NETMASK=
-EXTERNAL_IPPOOL_START=
-EXTERNAL_IPPOOL_END=
 KEYPAIR=vioKey
 
 # Change message background colors (uncomment four below for white background)
@@ -115,31 +122,139 @@ EOF
   fi
 }
 
-rally_create_users() {
-  local description="create $TENANT_COUNT tenants and create $USERS_PER_TENANT users for each tenant, and add role 'admin' to all created users"
-  if [ "-h" == $1 ]
+rally_generate_user_file() {
+  local description="generate rally user file which contains tenant and user information"
+  local tenant_count="2"
+  local tenant_prefix="vio_tenant"
+  local user_per_tenant="2"
+  local user_password="vmware"
+  while [[ $# > 0 ]]
+  do
+    key="$1"
+    case $key in
+      -h|--help)
+      cecho "$description" $cyan
+      if [[ "-usage_hidden" != $2 ]]
+      then
+        cecho "usage: $0 ${FUNCNAME} [-c tenant_count(default $tenant_count)][-t tenant_prefix(default $tenant_prefix)][-u user_per_tenant(default $user_per_tenant)][-p user_password(default $user_password)]" $yellow
+      fi
+      exit 0
+      ;;
+      -c|--tenant_count)
+      tenant_count="$2"
+      shift
+      ;;
+      -t|--tenant_prefix)
+      tenant_prefix="$2"
+      shift
+      ;;
+      -u|--user_per_tenant)
+      user_per_tenant="$2"
+      shift
+      ;;
+      -p|--user_password)
+      user_password="$2"
+      shift
+      ;;
+      *)
+    esac
+    shift
+  done
+  if [ -f $RALLY_USER_FILE ]
   then
-    cecho "$description" $cyan
+    cecho "$description -- skipped as $RALLY_USER_FILE already exists" $yellow
     exit 0
   fi
-  cecho "$description -- starting" $cyan
-  for i in `seq 1 $TENANT_COUNT`
-  do
-    cecho "creating tenant $TENANT_PREFIX${i}" $cyan
-    keystone tenant-create --name $TENANT_PREFIX${i}
-    for j in `seq 1 $USERS_PER_TENANT`
+  echo -n "" > $RALLY_USER_FILE
+  for i in `seq 1 $tenant_count`
+  do  
+    for j in `seq 1 $user_per_tenant`
     do
-      cecho "creating user $TENANT_PREFIX${i}_user${j} in tenant $TENANT_PREFIX${i}" $cyan
-      keystone user-create --name $TENANT_PREFIX${i}_user${j} --pass $USER_PASSWORD --tenant $TENANT_PREFIX${i}
-      cecho "adding role 'admin' to user $TENANT_PREFIX${i}_user${j} in tenant $TENANT_PREFIX${i}" $cyan
-      keystone user-role-add --user $TENANT_PREFIX${i}_user${j} --tenant $TENANT_PREFIX${i} --role admin
+      echo "$tenant_prefix${i} $tenant_prefix${i}_user${j} $user_password admin" >> $RALLY_USER_FILE
     done
+  done
+}
+
+rally_create_tenants() {
+  local description="create tenants with users per $RALLY_USER_FILE"
+  if [ "-h" == $1 ]
+  then
+    cecho "$description, add option '-u' or '--create-users' to create users as well" $cyan
+    exit 0
+  fi
+  if [ ! -f $RALLY_USER_FILE ]
+  then
+    cecho "$description -- $RALLY_USER_FILE does not exist" $red
+    exit 1
+  fi
+  cecho "$description -- starting" $cyan
+  local previous_tenant=""
+  while read line; do
+    read -r -a array <<< "$line"
+    if [[ ${#array[@]} > 2 ]]
+    then
+      tenant=${array[0]}
+      user=${array[1]}
+      password=${array[2]}
+      role="_member_"
+      if [[ "$tenant" != "$previous_tenant" ]]
+      then
+        cecho "creating tenant $tenant" $cyan 
+        keystone tenant-create --name $tenant
+        previous_tenant=$tenant
+      fi
+      if [[ "-u" == $1 ]] || [[ "--create-users" == $1 ]]
+      then
+        cecho "creating user $user in tenant $tenant" $cyan
+        keystone user-create --name $user --pass $password --tenant $tenant
+      fi
+      if [[ ${#array[@]} > 3 ]]
+      then
+        role=${array[3]}
+      fi
+      cecho "adding role $role to user $user in tenant $tenant" $cyan
+      keystone user-role-add --user $user --tenant $tenant --role $role
+    fi
+  done < $RALLY_USER_FILE
+  cecho "$description -- done" $cyan
+}
+
+rally_remove_tenants() {
+  local description="remove tenants with users per $RALLY_USER_FILE"
+  if [ "-h" == $1 ]
+  then
+    cecho "$description, add option '-u' or '--remove-users' to remove users as well" $cyan
+    exit 0
+  fi
+  if [ ! -f $RALLY_USER_FILE ]
+  then
+    cecho "$description -- $RALLY_USER_FILE does not exist" $red
+    exit 1
+  fi
+  cecho "$description -- starting" $cyan
+  if [[ "-u" == $1 ]] || [[ "--remove-users" == $1 ]]
+  then
+    for user in `awk '{if($2) print $2;}' $RALLY_USER_FILE | sort | uniq`
+    do
+      cecho "deleting user $user" $cyan
+      keystone user-delete $user
+    done
+  fi
+  for tenant in `awk '{if($1) print $1;}' $RALLY_USER_FILE | sort | uniq`
+  do
+    for sg in `neutron security-group-list --tenant-id $tenant | grep -v "name" | awk 'BEGIN {FS="|";} {if($2&&match($2,"([^ ]+)")) print $2}'`
+    do
+      cecho "deleting security-group '${sg}' in tenant $tenant" $cyan
+      neutron security-group-delete ${sg}
+    done
+    cecho "deleting tenant $tenant" $cyan
+    keystone tenant-delete $tenant
   done
   cecho "$description -- done" $cyan
 }
 
 rally_generate_deployment() {
-  local description="generate rally deployment file '$RALLY_DEPLOY_FILE' with populated rally users" 
+  local description="generate rally deployment file '$RALLY_DEPLOY_FILE' with regard to user information in $RALLY_USER_FILE" 
   if [ "-h" == $1 ]
   then
     cecho "$description" $cyan
@@ -164,14 +279,20 @@ rally_generate_deployment() {
   "https_cacert": "",
 }
 EOF
-  for i in `seq 1 $TENANT_COUNT`
-  do
-    for j in `seq 1 $USERS_PER_TENANT`
-    do
-      sed -i '/users/ a\    {\n      "username": "'$TENANT_PREFIX${i}'_user'${j}'",\n      "password": "'$USER_PASSWORD'",\n      "tenant_name": "'$TENANT_PREFIX${i}'"\n    },' $RALLY_DEPLOY_FILE
-    done
-  done  
-  sed -i '/    },/N;s/    },\n  ],/    }\n  ],/' $RALLY_DEPLOY_FILE 
+  if [ -f $RALLY_USER_FILE ]
+  then
+    while read line; do
+      read -r -a array <<< "$line"
+      if [[ ${#array[@]} > 2 ]]
+      then
+        tenant=${array[0]}
+        user=${array[1]}
+        password=${array[2]}
+        sed -i '/users/ a\    {\n      "username": "'$user'",\n      "password": "'$password'",\n      "tenant_name": "'$tenant'"\n    },' $RALLY_DEPLOY_FILE
+      fi
+    done < $RALLY_USER_FILE
+    sed -i '/    },/N;s/    },\n  ],/    }\n  ],/' $RALLY_DEPLOY_FILE 
+  fi
   cecho "$description -- done" $cyan
 }
 
@@ -182,9 +303,9 @@ rally_init() {
     cecho "$description" $cyan
     exit 0
   fi
-  rally_conf_file
+  rally_conf_file -o
   cecho "executing :: rally-manage --config-file $RALLY_CONF_FILE db recreate" $cyan
-  rally-manage --nodebug --norally-debug --config-file $RALLY_CONF_FILE db recreate 
+  rally-manage --config-file $RALLY_CONF_FILE --nodebug --norally-debug db recreate 
   rally_generate_deployment
   cecho "executing :: rally --config-file $RALLY_CONF_FILE deployment create --name $RALLY_DEPLOY_NAME --filename $RALLY_DEPLOY_FILE" $cyan
   if [ -f $RALLY_FILE_REPO/openrc ]
@@ -195,19 +316,61 @@ rally_init() {
 }
 
 create_external_network() {
-  local description="create external network '$EXTERNAL_NETWORK' with IP pool $EXTERNAL_IPPOOL_START - $EXTERNAL_IPPOOL_END"
-  if [ "-h" == $1 ]
+  local description="create external network '$EXTERNAL_NETWORK'"
+  local usage="usage: $0 ${FUNCNAME} -p dvportgroup -s ip_pool_start -e ip_pool_end -g gateway -n netmask"
+  local dvportgroup=""
+  local ip_pool_start=""
+  local ip_pool_end=""
+  local gateway=""
+  local netmask=""
+  while [[ $# > 0 ]]
+  do
+    key="$1"
+    case $key in
+      -h|--help)
+      cecho "$description" $cyan
+      if [[ "-usage_hidden" != $2 ]]
+      then
+        cecho "$usage" $yellow
+      fi
+      exit 0
+      ;;
+      -p|--dvportgroup)
+      dvportgroup="$2"
+      shift
+      ;;
+      -s|--ip_pool_start)
+      ip_pool_start="$2"
+      shift
+      ;;
+      -e|--ip_pool_end)
+      ip_pool_end="$2"
+      shift
+      ;;
+      -g|--gateway)
+      gateway="$2"
+      shift
+      ;;
+      -n|--netmask)
+      netmask="$2"
+      shift
+      ;;
+      *)
+    esac
+    shift
+  done
+  if [[ "$dvportgroup" == "" ]] || [[ "$ip_pool_start" == "" ]] || [[ "$ip_pool_end" == "" ]] || [[ "$gateway" == "" ]] || [[ "$netmask" == "" ]]
   then
-    cecho "$description" $cyan
+    cecho "$usage" $yellow
     exit 0
-  fi
+  fi 
   cecho "$description -- starting" $cyan
-  neutron net-create $EXTERNAL_NETWORK -- --provider:network_type=portgroup --provider:physical_network=$EXTERNAL_NET_DVPORTGROUP --router:external=True;neutron subnet-create --name $EXTERNAL_NETWORK --allocation-pool start=$EXTERNAL_IPPOOL_START,end=$EXTERNAL_IPPOOL_END --gateway $EXTERNAL_NET_GATEWAY $EXTERNAL_NETWORK $EXTERNAL_NETMASK -- --enable_dhcp=False 
+  neutron net-create $EXTERNAL_NETWORK -- --provider:network_type=portgroup --provider:physical_network=$dvportgroup --router:external=True;neutron subnet-create --name $EXTERNAL_NETWORK --allocation-pool start=$ip_pool_start,end=$ip_pool_end --gateway $gateway $EXTERNAL_NETWORK $netmask -- --enable_dhcp=False 
   cecho "$description -- done" $cyan
 }
 
 remove_external_network() {
-  description="remove external network '$EXTERNAL_NETWORK' with IP pool $EXTERNAL_IPPOOL_START - $EXTERNAL_IPPOOL_END"
+  description="remove external network '$EXTERNAL_NETWORK'"
   if [ "-h" == $1 ]
   then
     cecho "$description" $cyan
@@ -326,7 +489,7 @@ EOF
 }
 
 rally_add_keypairs() {
-  local description="create keypair '$KEYPAIR' for all created users $TENANT_PREFIX(1-$TENANT_COUNT)_user(1-$USERS_PER_TENANT)"
+  local description="create keypair '$KEYPAIR' for users in $RALLY_USER_FILE"
   if [ "-h" == $1 ]
   then
     cecho "$description" $cyan
@@ -334,17 +497,26 @@ rally_add_keypairs() {
   fi
   cecho "$description -- starting" $cyan
   mkdir -p $RALLY_FILE_REPO/$KEYPAIR
-  for user in `keystone user-list | grep $TENANT_PREFIX | awk 'BEGIN {FS="|";} {print $3}'`
-  do
-    tenant=`expr "$user" : "\($TENANT_PREFIX[0-9]*\)"`
-    cecho "creating keypair '$KEYPAIR' to user $user" $cyan
-    nova --os-user-name $user --os-password $USER_PASSWORD --os-tenant-name $tenant keypair-add $KEYPAIR > $RALLY_FILE_REPO/$KEYPAIR/$user
-  done
+  if [ -f $RALLY_USER_FILE ]
+  then
+    while read line; do
+      read -r -a array <<< "$line"
+      if [[ ${#array[@]} > 2 ]]
+      then
+        tenant=${array[0]}
+        user=${array[1]}
+        password=${array[2]}
+        cecho "creating keypair '$KEYPAIR' to user $user in tenant $tenant and storing to file $RALLY_FILE_REPO/$KEYPAIR/$tenant/$user" $cyan
+        mkdir -p $RALLY_FILE_REPO/$KEYPAIR/$tenant
+        nova --os-user-name $user --os-password $password --os-tenant-name $tenant keypair-add $KEYPAIR > $RALLY_FILE_REPO/$KEYPAIR/$tenant/$user
+      fi
+    done < $RALLY_USER_FILE
+  fi 
   cecho "$description -- done" $cyan
 }
 
 rally_increase_quota() {
-  local description="increase quota for all created tenants $TENANT_PREFIX(1-$TENANT_COUNT)"
+  local description="increase quota for tenants and users in $RALLY_USER_FILE"
   if [ "-h" == $1 ]
   then
     cecho "$description" $cyan
@@ -358,55 +530,82 @@ rally_increase_quota() {
   nova quota-defaults
   cecho "updating cinder default quota" $cyan
   cinder quota-class-update --volumes 1100 --snapshots 1100 --gigabytes 11000 default
-  for tid in `keystone tenant-list | grep $TENANT_PREFIX | awk 'BEGIN {FS="|";} {print $2}'`
-do
-  cecho "updating neutron quota for tenant $tid" $cyan
-  neutron quota-update --tenant-id $tid --network 50 --subnet 50 --port 1500 --router 50 --security-group 1500 --security-group-rule 5000 --vip 50 --floatingip 50
-done
+  if [ -f $RALLY_USER_FILE ]
+  then
+    local previous_tenant=""
+    while read line; do
+      read -r -a array <<< "$line"
+      if [[ ${#array[@]} > 2 ]]
+      then
+        tenant=${array[0]}
+        if [[ "$tenant" != "$previous_tenant" ]]
+        then
+          cecho "updating neutron quota for tenant $tenant" $cyan
+          neutron quota-update --tenant-id $tenant --network 50 --subnet 50 --port 1500 --router 50 --security-group 1500 --security-group-rule 5000 --vip 50 --floatingip 50
+          previous_tenant=$tenant 
+        fi
+      fi
+    done < $RALLY_USER_FILE
+  fi
   cecho "$description -- done" $cyan 
 }
 
 rally_list_stacks() {
-  local description="list heat stacks for all created users $TENANT_PREFIX(1-$TENANT_COUNT)_user(1-$USERS_PER_TENANT)"
+  local description="list heat stacks for users in $RALLY_USER_FILE"
   if [ "-h" == $1 ]
   then
     cecho "$description" $cyan
     exit 0
   fi
   cecho "$description -- starting" $cyan 
-  for user in `keystone user-list | grep $TENANT_PREFIX | awk 'BEGIN {FS="|";} {print $3}'`
-  do
-    cecho "listing all stacks owned by user $user" $cyan
-    tenant=`expr "$user" : "\($TENANT_PREFIX[0-9]*\)"`
-    credential="--os-username $user --os-password $USER_PASSWORD --os-tenant-name $tenant"
-    heat $credential stack-list
-  done
+  if [ -f $RALLY_USER_FILE ]
+  then
+    while read line; do
+      read -r -a array <<< "$line"
+      if [[ ${#array[@]} > 2 ]]
+      then
+        tenant=${array[0]}
+        user=${array[1]}
+        password=${array[2]}
+        cecho "listing all stacks owned by user $user in tenant $tenant" $cyan
+        heat --os-username $user --os-password $password --os-tenant-name $tenant stack-list
+      fi
+    done < $RALLY_USER_FILE
+  fi
   cecho "$description -- done" $cyan 
 }
 
 rally_remove_stacks() {
-  local description="remove heat stacks for all created users $TENANT_PREFIX(1-$TENANT_COUNT)_user(1-$USERS_PER_TENANT)"
+  local description="remove heat stacks for users in $RALLY_USER_FILE"
   if [ "-h" == $1 ]
   then
     cecho "$description" $cyan
     exit 0
   fi
   cecho "$description -- starting" $cyan
-  for user in `keystone user-list | grep $TENANT_PREFIX | awk 'BEGIN {FS="|";} {print $3}'`
-  do
-    cecho "deleting all stacks owned by user $user" $cyan
-    tenant=`expr "$user" : "\($TENANT_PREFIX[0-9]*\)"`
-    credential="--os-username $user --os-password $USER_PASSWORD --os-tenant-name $tenant"
-    for stack in `heat $credential stack-list | grep -v "stack_name" | grep -v "IN_PROGRESS" | awk 'BEGIN {FS="|";} {if($3) print $3}'`
-    do
-      heat $credential stack-delete $stack
-    done
-  done
+  if [ -f $RALLY_USER_FILE ]
+  then
+    while read line; do
+      read -r -a array <<< "$line"
+      if [[ ${#array[@]} > 2 ]]
+      then
+        tenant=${array[0]}
+        user=${array[1]}
+        password=${array[2]}
+        cecho "deleting all stacks owned by user $user in tenant $tenant" $cyan
+        credential="--os-username $user --os-password $password --os-tenant-name $tenant"
+        for stack in `heat $credential stack-list | grep -v "stack_name" | grep -v "IN_PROGRESS" | awk 'BEGIN {FS="|";} {if($3) print $3}'`
+        do
+          heat $credential stack-delete $stack
+        done
+      fi
+    done < $RALLY_USER_FILE
+  fi
   cecho "$description -- done" $cyan
 }
 
 check_wordpress_fips() {
-  local description="check each floating ip address if there is a wordpress apps bound"
+  local description="check each floating ip address if there is a wordpress apps running"
   if [ "-h" == $1 ]
   then
     cecho "$description" $cyan
@@ -462,21 +661,46 @@ EOF
 
 rally_hot_weave() {
   local description="copy $(dirname "${BASH_SOURCE[0]}")/../heat to $RALLY_HOT_DIR and weave templates for local execution, e.g. local apt repository"
-  if [[ -z $1 ]] || [[ "-h" == $1 ]]
+  local usage="usage: $0 ${FUNCNAME} -s local_apt_repo_server [-d private_network_dns]"
+  local local_repo=""
+  local private_network_dns=""
+  while [[ $# > 0 ]]
+  do
+    key="$1"
+    case $key in
+      -h|--help)
+      cecho "$description" $cyan
+      if [[ "-usage_hidden" != $2 ]]
+      then
+        cecho "$usage" $yellow
+      fi
+      exit 0
+      ;;
+      -s|--local_apt_repo_server)
+      local_repo="$2"
+      shift
+      ;;
+      -d|--private_network_dns)
+      private_network_dns="$2"
+      shift
+      ;;
+      *)
+    esac
+    shift
+  done
+  if [ "$local_repo" == "" ]
   then
-    cecho "$description" $cyan
-    if [[ "-usage_hidden" != $2 ]]
-    then
-      cecho "usage: $0 ${FUNCNAME} local_apt_repo_url" $yellow
-    fi
+    cecho "$usage" $yellow
     exit 0
   fi
-  description="copy $(dirname "${BASH_SOURCE[0]}")/../heat to $RALLY_HOT_DIR and weave templates using local apt repository '${1}'"
+  description="copy $(dirname "${BASH_SOURCE[0]}")/../heat to $RALLY_HOT_DIR and weave templates using local apt repository '$local_repo'"
   cecho "$description -- starting" $cyan
   mkdir -p $RALLY_HOT_DIR
-  local local_repo=$1
   cp -r $(dirname "${BASH_SOURCE[0]}")/../heat/* $RALLY_HOT_DIR/
-  sed -i "s/default: '8.8.8.8'/default: [10.111.0.1,10.111.0.2]/" $RALLY_HOT_DIR/lib/wordpress_networks.yaml
+  if [ "$private_network_dns" != "" ]
+  then
+    sed -i "s/default: '8.8.8.8'/default: $private_network_dns/" $RALLY_HOT_DIR/lib/wordpress_networks.yaml
+  fi
   sed -i '/apt-get update/ i\            echo "deb http://'$local_repo'/ mydebs/" > /etc/apt/sources.list' $RALLY_HOT_DIR/lib/mysql.yaml
   sed -i '/apt-get update/ i\            echo "deb http://'$local_repo'/ mydebs/" > /etc/apt/sources.list' $RALLY_HOT_DIR/lib/wordpress.yaml
   sed -i 's/wordpress.org/'$local_repo'/' $RALLY_HOT_DIR/lib/wordpress.yaml
@@ -530,6 +754,7 @@ rally_hot_task_file() {
   local task_file=$RALLY_TASK_DIR/stack.json
   local runs=1
   local concurrency=1 
+  local template_parameters=""
   while [[ $# > 0 ]]
   do
     key="$1"
@@ -538,7 +763,7 @@ rally_hot_task_file() {
       cecho "$description" $cyan
       if [[ "-usage_hidden" != $2 ]]
       then
-        cecho "usage: $0 ${FUNCNAME} [-s scenario(default $scenario)][-t template(default $template)][-o output(default $task_file)][-r runs(default $runs)][-c concurrency(default $concurrency)]" $yellow
+        cecho "usage: $0 ${FUNCNAME} [-s scenario(default $scenario)][-t template(default $template)][-o output(default $task_file)][-r runs(default $runs)][-c concurrency(default $concurrency)][-p template_parameters(example: flavor=m1.small,volume_count=1,volume_size=5)]" $yellow
       fi
       exit 0
       ;;
@@ -548,6 +773,10 @@ rally_hot_task_file() {
       ;;
       -t|--template)
       template="$2"
+      shift
+      ;;
+      -p|--template_parameters)
+      template_parameters="$2"
       shift
       ;;
       -o|--output)
@@ -612,6 +841,20 @@ rally_hot_task_file() {
           max: 0
   {% endfor %}
 EOF
+    if [ "$template_parameters" != "" ]
+    then
+      array=`echo $template_parameters | tr "," "\n"`
+      for item in $array
+      do
+        eq=(`echo $item | sed 's/=/ /'`)
+        if [ ${#eq[@]} -eq 2 ]
+        then
+          param=${eq[0]}
+          val=${eq[1]}
+          sed -i 's/'$param': "\([^"]*\)"/'$param': "'$val'"/;s/'$param': \([0-9]\+\)/'$param': '$val'/' $task_file
+        fi
+      done
+    fi
   else
     cat >$task_file <<EOF
 {
@@ -639,6 +882,20 @@ EOF
   ]
 }
 EOF
+    if [ "$template_parameters" != "" ]
+    then
+      array=`echo $template_parameters | tr "," "\n"`
+      for item in $array
+      do
+        eq=(`echo $item | sed 's/=/ /'`)
+        if [ ${#eq[@]} -eq 2 ]
+        then
+          param=${eq[0]}
+          val=${eq[1]}
+          sed -i 's/"'$param'": "\([^"]*\)"/"'$param'": "'$val'"/;s/"'$param'": \([0-9]\+\)/"'$param'": '$val'/' $task_file
+        fi
+      done
+    fi
   fi
   cecho "$description -- done" $cyan
 }
@@ -752,7 +1009,7 @@ rally_task_report() {
   cecho "$description -- done" $cyan
 }
 
-funcs=`typeset -f | awk '/ \(\) $/ && !/^(cecho|parse_yaml|rally_hot_parameters|rally_hot_nested_templates|env_file|defcore_seeding|defcore_remove_seeding) / {print $1}'`
+funcs=`typeset -f | awk '/ \(\) $/ && !/^(cecho|parse_yaml|rally_hot_parameters|rally_hot_nested_templates|env_file|defcore_seeding|defcore_remove_seeding|remove_tenants_users) / {print $1}'`
 
 usage() {
   cecho "usage:" $cyan
